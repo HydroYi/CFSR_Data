@@ -1,1 +1,127 @@
-Guidance for wgrib2 installation and utilities
+# Guidance to install and use WGRIB2 in GreatLakes HPC
+
+
+
+# Prerequisites
+Building wgrib2 requires, CMake (version 3.15+), a C compiler, a Fortran compiler (optional), and various 3rd party libraries depending on the selected build options.
+•	A Fortran compiler is only required to build the Fortran API (MAKE_FTN_API=ON) or for grid interpolation (USE_IPOLATES=ON).
+•	wgrib2 optionally depends on netcdf-c to read and write NetCDF files (USE_NETCDF=ON)
+•	NCEPLIBS-ip library (version 5.1.0+) is required for grid interpolation (USE_IPOLATES=ON).
+•	libaec.a (version 1.0.6+) is required to support files with AEC compression (USE_AEC=ON).
+•	NCEPLIBS-g2c library (version 1.9.0+) is required to use wgrib2 with JPEG (USE_JASPER=ON or USE_OPENJPEG=ON) and PNG (USE_PNG=ON) compression. Make sure that the library is built with the appropriate build options enabled (some are not enabled by default). For example, to use wgrib2 with OpenJPEG, g2c must be built with OpenJPEG enabled and Jasper disabled. Please refer to g2c's readme file for more detail.
+Installing
+Download the tarball from the release page and unpack it, and cd into the main directory of the library. Then run the following commands, substituting your directory locations for the CMAKE_INSTALL_PREFIX (where wgrib2 will be installed), and the CMAKE_PREFIX_PATH (where the build will look for dependencies):
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=install -DCMAKE_PREFIX_PATH="/usr/local/NCEPLIBS-g2c;/usr/local/NCEPLIBS-ip"
+make
+make install
+
+
+ 
+To install wgrib2 with the required dependencies on an HPC cluster, follow these steps:
+
+________________________________________
+# Step 1: Load Required Modules
+
+Module load gcc netcdf-c jasper cmake
+Which  jasper      ### /sw/pkgs/coe/o/image-libraries/220318/bin/jasper
+
+________________________________________
+# Step 2: Install Required Libraries
+These are required for advanced grid interpolation, compression, and format support.
+1️⃣ Install NCEPLIBS-ip (Interpolation)
+git clone https://github.com/NOAA-EMC/NCEPLIBS-ip.git
+cd NCEPLIBS-ip
+git checkout v5.1.0  # Ensure correct version
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/home/yhon/wgrib2_deps
+make -j$(nproc)
+make install
+
+2️⃣ Install libaec (AEC Compression)
+git clone https://gitlab.dkrz.de/k202009/libaec.git
+cd libaec
+git checkout v1.0.6
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/home/yhon /wgrib2_deps
+make -j$(nproc)
+make install
+
+3️⃣ Install NCEPLIBS-g2c (GRIB2 Compression)
+git clone https://github.com/NOAA-EMC/NCEPLIBS-g2c.git
+cd NCEPLIBS-g2c
+mkdir build
+cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/home/yhon/wgrib2_deps/NCEPLIBS-g2c -DJASPER_INCLUDE_DIR=/sw/pkgs/coe/o/libimage/220318/include -DJASPER_LIBRARY=/sw/pkgs/coe/o/libimage/220318/lib/libjasper.so
+make
+make test
+make install
+
+###
+/sw/pkgs/coe/o/libimage/220318/include/jasper/jasper.h
+/sw/pkgs/coe/o/libimage/220318/lib/libjasper.so
+###
+________________________________________
+# Step 3: Install wgrib2
+Now that dependencies are installed, build wgrib2:
+
+git clone https://github.com/NOAA-EMC/NCEPLIBS-wgrib2.git
+mv NCEPLIBS-wgrib2 wgrib2
+cd wgrib2
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=/home/yhon/wgrib2 -DCMAKE_PREFIX_PATH="/ home/yhon/wgrib2_deps/NCEPLIBS-g2c;/home/yhon/wgrib2_deps/NCEPLIBS-ip"
+make
+make install
+________________________________________
+# Step 4: Verify Installation
+Set environment variables:
+bash
+CopyEdit
+export PATH=$HOME/wgrib2_install/bin:$PATH
+export LD_LIBRARY_PATH=$HOME/wgrib2_deps/lib:$LD_LIBRARY_PATH
+Test wgrib2:
+bash
+CopyEdit
+wgrib2 -V
+________________________________________
+# Step 5: Running wgrib2 on HPC
+
+##example to extract specific variables from a grib2 file to a new grib2 file
+/home/yhon/wgrib2/bin/wgrib2 input.grib2 | egrep ':(UGRD:10 m above ground|VGRD:10 m above ground|APCP:surface|MSLMA:mean sea level)' | /usr/local/Modules/apps/wgrib2/3.1.2/bin/wgrib2 -i input.grib2 -grib output.grib2
+
+##example to cut a geographic region from a grib2 file to a new grib2 file
+/usr/local/Modules/apps/wgrib2/3.1.2/bin/wgrib2 input.grib2 -small_grib -93.5:-72.0 41.0:48.5 output.grib2
+or
+/usr/local/Modules/apps/wgrib2/3.1.2/bin/wgrib2 input.grib2 -small_grib lon_west:lon_east lat_south:lat_north output.grib2
+
+
+Create a Slurm script (wgrib2_job.sh):
+bash
+CopyEdit
+#!/bin/bash
+#SBATCH --job-name=wgrib2_test
+#SBATCH --output=wgrib2_test.log
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=4G
+#SBATCH --time=00:10:00
+
+export PATH=$HOME/wgrib2_install/bin:$PATH
+export LD_LIBRARY_PATH=$HOME/wgrib2_deps/lib:$LD_LIBRARY_PATH
+
+wgrib2 input.grib2 -match "TMP" -small_grib -125:-66 25:50 output.grib2
+Submit job:
+bash
+CopyEdit
+sbatch wgrib2_job.sh
+________________________________________
+# Step 6: Troubleshooting
+❌ wgrib2: Command Not Found?
+✔ Check: ls $HOME/wgrib2_install/bin/wgrib2
+✔ Run manually: $HOME/wgrib2_install/bin/wgrib2 -V
+❌ Missing Libraries?
+✔ Check LD_LIBRARY_PATH:
+bash
+CopyEdit
+echo $LD_LIBRARY_PATH
+This will install wgrib2 with all required libraries for interpolation and compression. 🚀 Let me know if you need adjustments for your HPC system!
